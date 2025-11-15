@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload - SmartClean</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/exifreader/dist/exif-reader.min.js"></script>
+</head>
+
+<body>
+
+<div class="upload-box">
+    <h1>Upload Photo</h1>
+
+    <div id="uploadArea" class="upload-area">
+        Tap here to select image
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" hidden>
+
+    <img id="preview" class="preview-img">
+
+    <button id="btnUpload" style="margin-top:20px; display:none;">Upload</button>
+
+    <p id="msg" style="text-align:center;"></p>
+</div>
+
+<script src="common.js"></script>
+
+<script>
+requireLogin();
+
+let file = null;
+let gps = null;
+
+uploadArea.onclick = () => fileInput.click();
+fileInput.onchange = e => loadFile(e.target.files[0]);
+
+async function loadFile(f) {
+    file = f;
+    preview.src = URL.createObjectURL(f);
+    preview.style.display = "block";
+    msg.textContent = "Reading GPS data...";
+
+    let exif = {};
+    try { exif = ExifReader.load(await f.arrayBuffer()); } catch {}
+
+    if (exif.GPSLatitude && exif.GPSLongitude) {
+        gps = {
+            lat: Number(exif.GPSLatitude.description),
+            lon: Number(exif.GPSLongitude.description)
+        };
+        msg.textContent = `GPS found: ${gps.lat}, ${gps.lon}`;
+    } else {
+        msg.textContent = "No GPS found (user will drop pin on map).";
+    }
+
+    btnUpload.style.display = "block";
+}
+
+btnUpload.onclick = async () => {
+    msg.textContent = "Uploading...";
+
+    const fd = new FormData();
+    fd.append("file", file);
+    if (gps) {
+        fd.append("lat_override", gps.lat);
+        fd.append("lon_override", gps.lon);
+    }
+
+    const r = await fetch(API + "/upload_manual/", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + requireLogin() },
+        body: fd
+    });
+
+    const j = await r.json();
+    if (!r.ok) return msg.textContent = "Upload error: " + j.detail;
+
+    msg.style.color = "green";
+    msg.textContent = "Uploaded successfully!";
+
+    setTimeout(() => location.href = "map.html", 1200);
+};
+</script>
+
+</body>
+</html>

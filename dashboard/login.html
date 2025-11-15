@@ -1,0 +1,268 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>SmartClean — AI Litter Mapping</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body { font-family: Inter, Arial; margin:0; background:#f7fafc; color:#0f172a; }
+    .hero { height:220px; position:relative; overflow:hidden; background:#000; }
+    .hero video{ width:100%; height:100%; object-fit:cover; opacity:0.95; }
+    .topbar{ position:absolute; left:12px; top:12px; background:rgba(255,255,255,0.95); padding:8px 12px; border-radius:8px; box-shadow:0 6px 18px rgba(15,23,42,0.08);}
+    .container{ padding:16px; max-width:1100px; margin:0 auto; }
+    .grid{ display:grid; grid-template-columns:1fr 360px; gap:16px; }
+    .card{ background:#fff; border-radius:12px; padding:14px; box-shadow:0 6px 18px rgba(2,6,23,0.06);}
+    #map{ height:520px; border-radius:10px; overflow:hidden; }
+    .uploadArea{ border:2px dashed #c7e6d8; padding:24px; text-align:center; border-radius:12px; background:linear-gradient(180deg,#f7fff8,#ffffff); }
+    .small{ font-size:13px; color:#64748b; }
+    input, button { font-size:14px; padding:10px; }
+    .hidden{ display:none; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <video autoplay muted loop playsinline>
+      <source src="demo.mp4" type="video/mp4">
+    </video>
+    <div class="topbar">
+      <strong>SmartClean</strong><div class="small">AI Litter Mapping</div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div>
+        <div class="card" id="authCard">
+          <div id="authForm">
+            <h3>Login / Signup</h3>
+            <input id="username" placeholder="username" /><br/><br/>
+            <input id="password" type="password" placeholder="password" /><br/><br/>
+            <button id="btnLogin">Login</button>
+            <button id="btnSignup">Signup</button>
+            <p id="authMsg" class="small"></p>
+          </div>
+          <div id="userPanel" class="hidden">
+            <h3>Welcome <span id="lblUser"></span></h3>
+            <button id="btnLogout">Logout</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <h4>Quick Actions</h4>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="btnTake">Take Photo (mobile)</button>
+            <button id="btnNearby">Nearby Reports</button>
+            <button id="btnLeaderboard">Leaderboard</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <h4>Recent Activity</h4>
+          <ul id="recentList" class="small"></ul>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h4>Report Litter</h4>
+          <div id="uploadBox" class="uploadArea">
+            <div id="dropZone">
+              <p><strong>Upload Litter Photo</strong></p>
+              <p class="small">Drag & Drop or <input type="file" id="fileInput" accept="image/*" style="display:inline-block;"/></p>
+            </div>
+            <p id="uploadStatus" class="small"></p>
+            <div id="manualPin" class="hidden small">No GPS detected. Click map to pin location.</div>
+            <button id="btnUpload" class="hidden">Confirm upload with pinned location</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <h4>Litter Map</h4>
+          <div id="map"></div>
+          <div style="margin-top:8px;">
+            <button id="btnRefresh">Refresh</button>
+            <button id="btnShowRoute">Show Optimized Route</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exifreader/dist/exif-reader.min.js"></script>
+<script>
+const API = "http://localhost:8000";
+let token = null;
+let username = null;
+let pinnedLocation = null;
+let uploadFile = null;
+
+// init map
+const map = L.map('map').setView([12.9716,77.5946], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const markersLayer = L.layerGroup().addTo(map);
+const routeLayer = L.layerGroup().addTo(map);
+
+// UI
+const authMsg = document.getElementById('authMsg');
+const authForm = document.getElementById('authForm');
+const userPanel = document.getElementById('userPanel');
+const lblUser = document.getElementById('lblUser');
+const uploadStatus = document.getElementById('uploadStatus');
+const manualPin = document.getElementById('manualPin');
+const btnConfirm = document.getElementById('btnUpload');
+
+document.getElementById('btnSignup').onclick = async () => {
+  authMsg.textContent = "Registering...";
+  const form = new FormData();
+  form.append("username", document.getElementById('username').value);
+  form.append("password", document.getElementById('password').value);
+  try{
+    const res = await fetch(API + "/register", { method: "POST", body: form });
+    const j = await res.json();
+    if (res.ok) {
+      authMsg.textContent = "Registered — now login.";
+    } else authMsg.textContent = j.detail || JSON.stringify(j);
+  }catch(e){ authMsg.textContent = "Error: "+e }
+};
+
+document.getElementById('btnLogin').onclick = async () => {
+  authMsg.textContent = "Logging in...";
+  const form = new FormData();
+  form.append("username", document.getElementById('username').value);
+  form.append("password", document.getElementById('password').value);
+  try{
+    const res = await fetch(API + "/login", { method: "POST", body: form });
+    const j = await res.json();
+    if (res.ok && j.access_token) {
+      token = j.access_token;
+      username = document.getElementById('username').value;
+      authForm.style.display = "none";
+      userPanel.classList.remove('hidden');
+      lblUser.textContent = username;
+      uploadStatus.textContent = "";
+      loadPoints();
+    } else {
+      authMsg.textContent = j.detail || JSON.stringify(j);
+    }
+  }catch(e){ authMsg.textContent = "Error: "+e }
+};
+
+document.getElementById('btnLogout').onclick = () => location.reload();
+
+// handle file pick and drag
+const fileInput = document.getElementById('fileInput');
+fileInput.onchange = async (e) => { handleFile(e.target.files[0]) };
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.opacity=0.8; });
+dropZone.addEventListener('dragleave', (e)=> { dropZone.style.opacity=1 });
+dropZone.addEventListener('drop', (e)=> { e.preventDefault(); dropZone.style.opacity=1; const f = e.dataTransfer.files[0]; handleFile(f); });
+
+async function handleFile(file) {
+  uploadFile = file;
+  uploadStatus.textContent = "Checking EXIF...";
+  const arrayBuffer = await file.arrayBuffer();
+  let tags = {};
+  try { tags = ExifReader.load(arrayBuffer); } catch(e){ tags = {}; }
+  // check GPS
+  if (tags.GPSLatitude && tags.GPSLongitude) {
+    const lat = tags.GPSLatitude.value ? tags.GPSLatitude.value : tags.GPSLatitude.description;
+    const lon = tags.GPSLongitude.value ? tags.GPSLongitude.value : tags.GPSLongitude.description;
+    // EXIFReader sometimes returns decimal string in description
+    const latN = (Array.isArray(lat) ? lat[0] : lat);
+    const lonN = (Array.isArray(lon) ? lon[0] : lon);
+    // attempt parsing description (safe)
+    const latVal = Number(tags.GPSLatitude.description || latN);
+    const lonVal = Number(tags.GPSLongitude.description || lonN);
+    uploadStatus.textContent = `GPS found in image: ${latVal.toFixed(6)}, ${lonVal.toFixed(6)} — will upload`;
+    pinnedLocation = {lat:latVal, lon:lonVal};
+    manualPin.classList.add('hidden');
+    btnConfirm.classList.remove('hidden');
+  } else {
+    uploadStatus.textContent = "No GPS inside image. Please click on map to pin location.";
+    manualPin.classList.remove('hidden');
+    btnConfirm.classList.remove('hidden');
+    pinnedLocation = null;
+  }
+}
+
+// map click to pin
+map.on('click', function(e){
+  if (!uploadFile) { return; }
+  pinnedLocation = {lat: e.latlng.lat, lon: e.latlng.lng};
+  uploadStatus.textContent = `Pinned location: ${pinnedLocation.lat.toFixed(6)}, ${pinnedLocation.lon.toFixed(6)}`;
+});
+
+// confirm upload (if EXIF present or pinned)
+btnConfirm.onclick = async () => {
+  if (!uploadFile) { uploadStatus.textContent = "Select a file first"; return; }
+  if (!pinnedLocation) { uploadStatus.textContent = "Pin a location first"; return; }
+  if (!token) { uploadStatus.textContent = "Login required"; return; }
+
+  uploadStatus.textContent = "Uploading...";
+  const form = new FormData();
+  form.append("file", uploadFile);
+  // If image had EXIF we allowed backend to read it; however backend requires EXIF.
+  // We'll send an override field when user pins location manually so backend will accept it.
+  form.append("lat_override", pinnedLocation.lat);
+  form.append("lon_override", pinnedLocation.lon);
+
+  try {
+    const res = await fetch(API + "/upload_manual/", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + token },
+      body: form
+    });
+    const j = await res.json();
+    if (res.ok && j.status === "ok") {
+      uploadStatus.textContent = `Uploaded at ${j.lat.toFixed(6)}, ${j.lon.toFixed(6)}`;
+      uploadFile = null;
+      loadPoints();
+    } else {
+      uploadStatus.textContent = "Upload error: " + (j.detail || JSON.stringify(j));
+    }
+  } catch(e){
+    uploadStatus.textContent = "Error: "+e;
+  }
+};
+
+// load markers
+async function loadPoints(){
+  markersLayer.clearLayers();
+  routeLayer.clearLayers();
+  try {
+    const res = await fetch(API + "/points/");
+    const geo = await res.json();
+    L.geoJSON(geo, {
+      onEachFeature: (f, layer) => {
+        const img = f.properties.image_url ? `<img src="${API}${f.properties.image_url}" width="140"><br/>` : "";
+        layer.bindPopup(img + f.properties.created_at);
+      }
+    }).addTo(markersLayer);
+  } catch(e){ console.error(e) }
+}
+
+document.getElementById('btnRefresh').onclick = loadPoints;
+
+// show route
+document.getElementById('btnShowRoute').onclick = async () => {
+  routeLayer.clearLayers();
+  try {
+    const res = await fetch(API + "/route/");
+    const j = await res.json();
+    if (!j.route || j.route.length === 0) { alert("No route"); return; }
+    const latlngs = j.route.map(p => [p.latitude, p.longitude]);
+    L.polyline(latlngs, {color:'blue', weight:4}).addTo(routeLayer);
+    j.route.forEach((p,i)=> L.marker([p.latitude,p.longitude]).addTo(routeLayer).bindPopup(`Stop ${i+1}`));
+    map.fitBounds(latlngs);
+  } catch(e){ console.error(e) }
+};
+
+// ping
+fetch(API + "/ping").catch(e=> console.warn("Backend unreachable", e));
+
+</script>
+</body>
+</html>

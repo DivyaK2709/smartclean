@@ -1,0 +1,12 @@
+streamlit>=1.20.0
+pymongo>=4.0.0
+python-dotenv
+pillow
+exifread
+opencv-python-headless
+numpy
+folium
+streamlit-folium
+requests
+passlib[bcrypt]
+geopy

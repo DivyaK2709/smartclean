@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Map - SmartClean</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div class="bottom-nav">
+    <button onclick="loadPoints()">Refresh</button>
+    <button onclick="showRoute()">Route</button>
+    <button onclick="location.href='upload.html'">Upload</button>
+    <button onclick="logout()">Logout</button>
+</div>
+
+<script src="common.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+requireLogin();
+
+const map = L.map("map").setView([12.97, 77.59], 13);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+const ptsLayer = L.layerGroup().addTo(map);
+const routeLayer = L.layerGroup().addTo(map);
+
+async function loadPoints() {
+    ptsLayer.clearLayers();
+
+    const r = await fetch(API + "/points/");
+    const g = await r.json();
+
+    L.geoJSON(g, {
+        onEachFeature: (f, layer) => {
+            if (f.properties.image_url) {
+                layer.bindPopup(`<img src="${API}${f.properties.image_url}" width="180">`);
+            }
+        }
+    }).addTo(ptsLayer);
+}
+
+async function showRoute() {
+    routeLayer.clearLayers();
+
+    const r = await fetch(API + "/route/");
+    const j = await r.json();
+
+    let coords = j.route_geojson
+        ? j.route_geojson.coordinates.map(c => [c[1], c[0]])
+        : j.route.map(p => [p.latitude, p.longitude]);
+
+    L.polyline(coords, { color: "blue", weight: 4 }).addTo(routeLayer);
+    map.fitBounds(coords);
+}
+
+loadPoints();
+</script>
+
+</body>
+</html>
